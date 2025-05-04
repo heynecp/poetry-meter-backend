@@ -4,10 +4,10 @@ import pronouncing
 
 app = FastAPI()
 
-# Allow frontend (React) to call this backend
+# Enable frontend access (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Open to all for now
+    allow_origins=["*"],  # In production, lock this to your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,11 +21,11 @@ async def analyze_text(request: Request):
 
     results = []
     for word in words:
-        lowered = word.lower()
-        stresses = pronouncing.stresses(lowered)
+        clean_word = ''.join(filter(str.isalpha, word))  # remove punctuation
+        stress = pronouncing.stresses(clean_word.lower())
         results.append({
             "word": word,
-            "stress": stresses[0] if stresses else "unknown"
+            "stress": stress[0] if stress else "unknown"
         })
 
-    return {"words": results}
+    return { "words": results }
