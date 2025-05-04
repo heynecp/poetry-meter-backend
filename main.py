@@ -1,94 +1,155 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from prosodic import Text
-import pronouncing
-import pyphen
-import re
+import React, { useRef, useState, useEffect } from "react";
+import "./App.css";
 
-app = FastAPI()
+const BACKEND_URL = "https://poetry-meter-backend.onrender.com/analyze";
+const rhymeColors = ["red", "green", "purple", "orange", "teal", "pink"];
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+function App() {
+  const editorRef = useRef(null);
+  const [timeoutId, setTimeoutId] = useState(null);
+  const [meter, setMeter] = useState(null);
 
-dic = pyphen.Pyphen(lang='en_US')
+  const handleInput = () => {
+    const rawText = editorRef.current.innerText;
 
-class TextInput(BaseModel):
-    text: str
-
-def get_stress_syllables(word):
-    phones = pronouncing.phones_for_word(word)
-    if phones:
-        stress = pronouncing.stresses(phones[0])
-        syllables = pronouncing.syllable_count(phones[0])
-        syllable_list = dic.inserted(word).split("-")
-        return stress, syllable_list
-    else:
-        return "unknown", dic.inserted(word).split("-")
-
-def get_rhyme_group(word):
-    rhymes = pronouncing.rhymes(word)
-    if not rhymes:
-        return None
-    phones = pronouncing.phones_for_word(word)
-    if phones:
-        rhyme_part = pronouncing.rhyming_part(phones[0])
-        return rhyme_part
-    return None
-
-def detect_meter(poem_text):
-    try:
-        t = Text(poem_text)
-        t.scan()
-        meters = list(set([line.meter.name for line in t.lines if line.meter]))
-        if not meters:
-            return "unmetered"
-        if len(meters) == 1:
-            return meters[0]
-        else:
-            return "mixed (" + ", ".join(meters) + ")"
-    except Exception as e:
-        print("Meter detection error:", e)
-        return "unknown"
-
-@app.post("/analyze")
-async def analyze_text(text_input: TextInput):
-    original_lines = text_input.text.splitlines()
-    meter_result = detect_meter(text_input.text)
-
-    all_lines = []
-
-    rhyme_groups = {}
-    words_raw = re.findall(r"\b[\w']+\b", text_input.text.lower())
-    for word in words_raw:
-        group = get_rhyme_group(word)
-        if group:
-            rhyme_groups.setdefault(group, []).append(word)
-
-    for line in original_lines:
-        word_objs = []
-        for word in line.split():
-            clean_word = re.sub(r"[^\w']", '', word).lower()
-            stress, syllables = get_stress_syllables(clean_word)
-            rhyme_group = get_rhyme_group(clean_word)
-
-            rhyme_group_id = None
-            if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
-                rhyme_group_id = rhyme_group
-
-            word_objs.append({
-                "word": word,
-                "stress": stress,
-                "syllables": syllables,
-                "rhymeGroup": rhyme_group_id
-            })
-        all_lines.append(word_objs)
-
-    return {
-        "lines": all_lines,
-        "meter": meter_result
+    if (timeoutId) {
+      clearTimeout(timeoutId);
     }
+
+    const id = setTimeout(() => {
+      fetchAnalysis(rawText);
+    }, 500);
+
+    setTimeoutId(id);
+  };
+
+  const fetchAnalysis = async (rawText) => {
+    try {
+      const res = await fetch(BACKEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: rawText })
+      });
+
+      const data = await res.json();
+      if (data.meter) setMeter(data.meter);
+      renderFormattedText(data.lines);
+    } catch (err) {
+      console.error("Error fetching stress data:", err);
+    }
+  };
+
+  const getCaretCharacterOffsetWithin = (element) => {
+    const sel = window.getSelection();
+    let charCount = -1;
+    if (sel.focusNode && element.contains(sel.focusNode)) {
+      const range = sel.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(element);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      charCount = preCaretRange.toString().length;
+    }
+    return charCount;
+  };
+
+  const setCaretPosition = (element, offset) => {
+    let charIndex = 0;
+    const nodeStack = [element];
+    let node, found = false;
+
+    while (!found && (node = nodeStack.pop())) {
+      if (node.nodeType === 3) {
+        const nextCharIndex = charIndex + node.length;
+        if (offset >= charIndex && offset <= nextCharIndex) {
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(node, offset - charIndex);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          found = true;
+        }
+        charIndex = nextCharIndex;
+      } else {
+        let i = node.childNodes.length;
+        while (i--) {
+          nodeStack.push(node.childNodes[i]);
+        }
+      }
+    }
+  };
+
+  const renderFormattedText = (lines) => {
+    const editor = editorRef.current;
+    const scrollPos = editor.scrollTop;
+    const caretOffset = getCaretCharacterOffsetWithin(editor);
+
+    const rhymeMap = {};
+    let nextColorIdx = 0;
+
+    editor.innerHTML = "";
+
+    lines.forEach((line) => {
+      const lineDiv = document.createElement("div");
+
+      line.forEach((item) => {
+        const wordSpan = document.createElement("span");
+        wordSpan.style.whiteSpace = "pre";
+
+        if (item.syllables && item.stress && item.stress !== "unknown") {
+          for (let i = 0; i < item.syllables.length; i++) {
+            const syllable = item.syllables[i];
+            const syllSpan = document.createElement("span");
+            syllSpan.textContent = syllable;
+            syllSpan.style.backgroundColor = item.stress[i] === "1" ? "#cce5ff" : "#fff7a3";
+            wordSpan.appendChild(syllSpan);
+          }
+        } else {
+          wordSpan.textContent = item.word;
+          wordSpan.style.color = "gray";
+        }
+
+        if (item.rhymeGroup !== undefined && item.rhymeGroup !== null) {
+          if (!(item.rhymeGroup in rhymeMap)) {
+            rhymeMap[item.rhymeGroup] = rhymeColors[nextColorIdx % rhymeColors.length];
+            nextColorIdx++;
+          }
+          wordSpan.style.borderBottom = `2px solid ${rhymeMap[item.rhymeGroup]}`;
+        }
+
+        lineDiv.appendChild(wordSpan);
+        lineDiv.appendChild(document.createTextNode(" "));
+      });
+
+      editor.appendChild(lineDiv);
+    });
+
+    editor.scrollTop = scrollPos;
+    setCaretPosition(editor, caretOffset);
+    editor.focus();
+  };
+
+  return (
+    <div className="page">
+      {meter && (
+        <div className="meter-header">
+          <strong>Detected Meter: </strong>
+          <span className="meter-term" title="Iambic meter consists of unstressed-stressed syllable pairs (da-DUM).">
+            {meter}
+          </span>
+        </div>
+      )}
+      <div
+        className="editor"
+        contentEditable
+        onInput={handleInput}
+        ref={editorRef}
+        spellCheck="false"
+        suppressContentEditableWarning
+        style={{ whiteSpace: "pre-wrap", outline: "none" }}
+      ></div>
+    </div>
+  );
+}
+
+export default App;
