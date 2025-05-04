@@ -1,12 +1,12 @@
 FROM python:3.11-slim
 
-# Install espeak and dependencies
+# Install espeak-ng and dependencies
 RUN apt-get update && \
-    apt-get install -y espeak libespeak1 libespeak-dev && \
+    apt-get install -y espeak-ng libespeak-ng1 libespeak-ng-dev && \
     pip install --upgrade pip
 
-# Set environment variable for library path
-ENV LD_LIBRARY_PATH=/usr/lib:/usr/local/lib
+# Set environment variable so prosodic can find espeak-ng
+ENV PATH_ESPEAK=/usr/lib/libespeak-ng.so.1
 
 # Set the working directory
 WORKDIR /app
