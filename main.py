@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pronouncing
@@ -20,19 +20,12 @@ dic = pyphen.Pyphen(lang='en_US')
 class TextInput(BaseModel):
     text: str
 
-METER_PATTERNS = {
-    "iambic": "01" * 5,
-    "trochaic": "10" * 5,
-    "anapestic": "001" * 3,
-    "dactylic": "100" * 3,
-}
-
 def get_stress_syllables(word):
     phones = pronouncing.phones_for_word(word)
     if phones:
         stress = pronouncing.stresses(phones[0])
-        parts = dic.inserted(word).split("-")
-        return stress, parts
+        syllables = dic.inserted(word).split("-")
+        return stress, syllables
     else:
         parts = dic.inserted(word).split("-")
         return "unknown", parts
@@ -43,67 +36,65 @@ def get_rhyme_group(word):
         return None
     phones = pronouncing.phones_for_word(word)
     if phones:
-        rhyme_part = pronouncing.rhyming_part(phones[0])
-        return rhyme_part
+        return pronouncing.rhyming_part(phones[0])
     return None
 
-def detect_meter(line_stresses):
-    meter_counts = Counter()
-    for stress in line_stresses:
-        cleaned = re.sub(r"[^01]", "", stress)
-        for meter, pattern in METER_PATTERNS.items():
-            if cleaned.startswith(pattern[:len(cleaned)]):
-                meter_counts[meter] += 1
-    if len(meter_counts) == 0:
-        return ["unknown"]
-    elif len(meter_counts) > 3:
-        return ["mixed"] + [m[0] for m in meter_counts.most_common(3)]
-    return [m[0] for m in meter_counts.most_common()]
+def detect_meter_from_stress(stress_seq):
+    meter_patterns = {
+        'iambic': ['01', '0101', '010101'],
+        'trochaic': ['10', '1010'],
+        'anapestic': ['001', '001001'],
+        'dactylic': ['100', '100100']
+    }
+    detected = []
+    for name, patterns in meter_patterns.items():
+        for pattern in patterns:
+            if stress_seq.startswith(pattern):
+                detected.append(name)
+                break
+    return detected[0] if detected else None
 
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    text = text_input.text
-    lines_raw = text.split("\n")
-    all_stresses = []
-    rhyme_groups = {}
-    result = []
+    lines_raw = text_input.text.splitlines()
+    words_raw = re.findall(r"\b[\w']+\b", text_input.text.lower())
 
-    words_flat = re.findall(r"\b[\w']+\b", text.lower())
-    for word in words_flat:
+    rhyme_groups = {}
+    for word in words_raw:
         group = get_rhyme_group(word)
         if group:
             rhyme_groups.setdefault(group, []).append(word)
 
+    result_lines = []
+    all_stress_sequences = []
+
     for line in lines_raw:
-        word_items = []
-        words = line.split()
-        line_stress = ""
-        for word in words:
-            clean = re.sub(r"[^\w']", '', word).lower()
-            stress, syllables = get_stress_syllables(clean)
-            rhyme = get_rhyme_group(clean)
+        word_data = []
+        for word in line.split():
+            clean_word = re.sub(r"[^\w']", '', word).lower()
+            stress, syllables = get_stress_syllables(clean_word)
+            rhyme_group = get_rhyme_group(clean_word)
 
-            if rhyme and len(rhyme_groups.get(rhyme, [])) > 1:
-                rhyme_id = rhyme
-            else:
-                rhyme_id = None
+            rhyme_group_id = None
+            if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
+                rhyme_group_id = rhyme_group
 
-            if stress != "unknown":
-                line_stress += stress
-
-            word_items.append({
+            word_data.append({
                 "word": word,
                 "stress": stress,
                 "syllables": syllables,
-                "rhymeGroup": rhyme_id
+                "rhymeGroup": rhyme_group_id
             })
 
-        all_stresses.append(line_stress)
-        result.append(word_items)
+            if stress != "unknown":
+                all_stress_sequences.append(stress)
 
-    meters = detect_meter(all_stresses)
+        result_lines.append(word_data)
 
-    return {
-        "lines": result,
-        "meters": meters
-    }
+    stress_seq_flat = ''.join(all_stress_sequences)
+    detected = [detect_meter_from_stress(stress_seq_flat[i:i+6]) for i in range(0, len(stress_seq_flat), 6)]
+    top_meters = [m for m, _ in Counter(filter(None, detected)).most_common(3)]
+    if len(top_meters) > 3:
+        top_meters = ['mixed'] + top_meters
+
+    return { "lines": result_lines, "meters": top_meters }
