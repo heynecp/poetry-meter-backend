@@ -1,72 +1,70 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from prosodic import Text
 import pronouncing
+import pyphen
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
-class TextRequest(BaseModel):
+dic = pyphen.Pyphen(lang='en')
+
+class RequestBody(BaseModel):
     text: str
 
-@app.post("/analyze")
-async def analyze_text(req: TextRequest):
-    lines = req.text.strip().split("\n")
-    output = []
+def analyze_line(line):
+    if not line.strip():
+        return []
 
-    for line in lines:
-        parsed = Text(line)
-        try:
-            parsed.parse()
-            tokens = parsed.tokens if isinstance(parsed.tokens, list) else parsed.tokens()
-        except Exception:
-            output.append([])
-            continue
-
-        line_data = []
-
-        for token in tokens:
-            word = token.string
-            stress = token.stress()
-            syllables = token.syllables()
-            syll_strs = [s.string for s in syllables] if syllables else []
-
-            phones = pronouncing.phones_for_word(word.lower())
-            rhyme_group = None
-            if phones:
-                rhyme_group = pronouncing.rhyming_part(phones[0])
-
-            if syll_strs and stress:
-                line_data.append({
-                    "word": word,
-                    "syllables": syll_strs,
-                    "stress": stress,
-                    "rhymeGroup": rhyme_group
-                })
-            else:
-                line_data.append({
-                    "word": word,
-                    "syllables": None,
-                    "stress": "unknown",
-                    "rhymeGroup": None
-                })
-
-        output.append(line_data)
-
-    # Determine overall meter
     try:
-        full = Text(req.text)
-        full.parse()
-        meter = full.bestMeter().name if full.bestMeter() else "free verse"
-    except Exception:
-        meter = "free verse"
+        parsed = Text(txt=line)
+        parsed.parse()
+    except Exception as e:
+        print(f"Prosodic failed on line: {line!r} with error: {e}")
+        return [{"word": line.strip(), "stress": "unknown"}]
 
-    return {"lines": output, "meter": meter}
+    line_data = []
+    for token in parsed.tokens():
+        word_text = token.string
+        stress = token.stress()
+        syllables = dic.inserted(word_text).split('-') if word_text else []
+
+        line_data.append({
+            "word": word_text,
+            "stress": stress,
+            "syllables": syllables,
+            "rhymeGroup": get_rhyme_group(word_text)
+        })
+
+    return line_data
+
+def get_rhyme_group(word):
+    phones = pronouncing.phones_for_word(word.lower())
+    if not phones:
+        return None
+    rhyming_part = pronouncing.rhyming_part(phones[0])
+    return hash(rhyming_part) % 36 if rhyming_part else None
+
+@app.post("/analyze")
+async def analyze_text(body: RequestBody):
+    lines = body.text.splitlines()
+    result = [analyze_line(line) for line in lines if line.strip()]
+
+    # Flatten all lines to check for overall meter
+    flat_text = ' '.join(body.text.splitlines()).strip()
+    try:
+        overall = Text(txt=flat_text)
+        overall.parse()
+        meter_type = overall.bestMeter().name if overall.bestMeter() else "free verse"
+    except Exception as e:
+        print(f"Failed to determine meter: {e}")
+        meter_type = "free verse"
+
+    return {"lines": result, "meter": meter_type}
