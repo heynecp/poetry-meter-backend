@@ -1,14 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from prosodic import Text
 import pronouncing
 import pyphen
 import re
-import prosodic
-
-prosodic.config.init()  # Required initialization for prosodic
-
-from prosodic import Text
 
 app = FastAPI()
 
@@ -28,13 +24,11 @@ def get_stress_syllables(word):
     phones = pronouncing.phones_for_word(word)
     if phones:
         stress = pronouncing.stresses(phones[0])
-        syllables = pronouncing.phones_for_word(word)[0].split()
-        # fallback to pyphen if syllables aren't available
-        parts = dic.inserted(word).split("-")
-        return stress, parts
+        syllables = pronouncing.syllable_count(phones[0])
+        syllable_list = dic.inserted(word).split("-")
+        return stress, syllable_list
     else:
-        parts = dic.inserted(word).split("-")
-        return "unknown", parts
+        return "unknown", dic.inserted(word).split("-")
 
 def get_rhyme_group(word):
     rhymes = pronouncing.rhymes(word)
@@ -46,52 +40,55 @@ def get_rhyme_group(word):
         return rhyme_part
     return None
 
-def detect_meter(text: str):
+def detect_meter(poem_text):
     try:
-        t = Text(text)
-        t.parse()
-        best = t.bestParses()[0]
-        return best.meter.name  # e.g., 'iambic', 'trochaic'
-    except Exception:
+        t = Text(poem_text)
+        t.scan()
+        meters = list(set([line.meter.name for line in t.lines if line.meter]))
+        if not meters:
+            return "unmetered"
+        if len(meters) == 1:
+            return meters[0]
+        else:
+            return "mixed (" + ", ".join(meters) + ")"
+    except Exception as e:
+        print("Meter detection error:", e)
         return "unknown"
 
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    original_text = text_input.text
-    lines_raw = original_text.strip().splitlines()
+    original_lines = text_input.text.splitlines()
+    meter_result = detect_meter(text_input.text)
 
-    response_lines = []
-    full_text_for_meter = []
+    all_lines = []
 
     rhyme_groups = {}
-    flat_words = re.findall(r"\b[\w']+\b", text_input.text.lower())
-    for word in flat_words:
+    words_raw = re.findall(r"\b[\w']+\b", text_input.text.lower())
+    for word in words_raw:
         group = get_rhyme_group(word)
         if group:
             rhyme_groups.setdefault(group, []).append(word)
 
-    for line in lines_raw:
-        words_in_line = line.strip().split()
-        line_words = []
-        for word in words_in_line:
+    for line in original_lines:
+        word_objs = []
+        for word in line.split():
             clean_word = re.sub(r"[^\w']", '', word).lower()
             stress, syllables = get_stress_syllables(clean_word)
             rhyme_group = get_rhyme_group(clean_word)
+
             rhyme_group_id = None
             if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
                 rhyme_group_id = rhyme_group
-            line_words.append({
+
+            word_objs.append({
                 "word": word,
                 "stress": stress,
                 "syllables": syllables,
                 "rhymeGroup": rhyme_group_id
             })
-        response_lines.append(line_words)
-        full_text_for_meter.append(" ".join([w['word'] for w in line_words]))
-
-    meter_guess = detect_meter("\n".join(full_text_for_meter))
+        all_lines.append(word_objs)
 
     return {
-        "lines": response_lines,
-        "meter": meter_guess
+        "lines": all_lines,
+        "meter": meter_result
     }
