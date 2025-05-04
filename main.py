@@ -20,16 +20,15 @@ dic = pyphen.Pyphen(lang='en_US')
 class TextInput(BaseModel):
     text: str
 
-def get_stress_syllables(word):
+def get_stress_and_syllables(word):
     phones = pronouncing.phones_for_word(word)
     if phones:
         stress = pronouncing.stresses(phones[0])
-        syllables = re.findall(r"[AEIOU]+[^0-9\s]*", phones[0])
-        if syllables:
-            hyphenated = dic.inserted(word).split("-")
-            return stress, hyphenated
-    parts = dic.inserted(word).split("-")
-    return "unknown", parts
+        syllables = dic.inserted(word).split('-')
+        return stress, syllables
+    else:
+        fallback = dic.inserted(word).split('-')
+        return "unknown", fallback
 
 def get_rhyme_group(word):
     rhymes = pronouncing.rhymes(word)
@@ -37,52 +36,44 @@ def get_rhyme_group(word):
         return None
     phones = pronouncing.phones_for_word(word)
     if phones:
-        rhyme_part = pronouncing.rhyming_part(phones[0])
-        return rhyme_part
+        return pronouncing.rhyming_part(phones[0])
     return None
-
-def detect_meter(text):
-    try:
-        t = Text(text)
-        t.parse()
-        return t.bestMeter().label
-    except:
-        return "unknown"
 
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    raw_lines = text_input.text.splitlines()
-    lines = []
-    all_text = []
-
+    raw_lines = text_input.text.strip().split('\n')
+    all_words = re.findall(r"\b[\w']+\b", text_input.text.lower())
     rhyme_groups = {}
-    for line in raw_lines:
-        words_raw = re.findall(r"\b[\w']+\b", line.lower())
-        for word in words_raw:
-            group = get_rhyme_group(word)
-            if group:
-                rhyme_groups.setdefault(group, []).append(word)
+
+    for word in all_words:
+        group = get_rhyme_group(word)
+        if group:
+            rhyme_groups.setdefault(group, []).append(word)
+
+    structured_lines = []
+    prosody_obj = Text(text_input.text)
+    prosody_obj.parse()
+
+    meter_type = prosody_obj.bestMeter().name if prosody_obj.bestMeter() else "free verse"
 
     for line in raw_lines:
-        word_data = []
-        for word in line.split():
+        words = line.strip().split()
+        line_result = []
+
+        for word in words:
             clean_word = re.sub(r"[^\w']", '', word).lower()
-            stress, syllables = get_stress_syllables(clean_word)
+            stress, syllables = get_stress_and_syllables(clean_word)
             rhyme_group = get_rhyme_group(clean_word)
 
-            rhyme_group_id = None
-            if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
-                rhyme_group_id = rhyme_group
+            rhyme_id = rhyme_group if rhyme_group and len(rhyme_groups[rhyme_group]) > 1 else None
 
-            word_data.append({
+            line_result.append({
                 "word": word,
                 "stress": stress,
                 "syllables": syllables,
-                "rhymeGroup": rhyme_group_id
+                "rhymeGroup": rhyme_id
             })
 
-        lines.append(word_data)
-        all_text.append(line)
+        structured_lines.append(line_result)
 
-    meter = detect_meter("\n".join(all_text))
-    return {"lines": lines, "meter": meter}
+    return {"meter": meter_type if meter_type else "free verse", "lines": structured_lines}
