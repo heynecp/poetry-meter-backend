@@ -1,10 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pronouncing
 import pyphen
 import re
-from scandroid import Scandroid
+import prosodic
 
 app = FastAPI()
 
@@ -16,7 +16,6 @@ app.add_middleware(
 )
 
 dic = pyphen.Pyphen(lang='en_US')
-scanner = Scandroid()
 
 class TextInput(BaseModel):
     text: str
@@ -26,9 +25,9 @@ def get_stress_syllables(word):
     if phones:
         stress = pronouncing.stresses(phones[0])
         syllables = pronouncing.syllable_count(phones[0])
-        return stress, pronouncing.phones_for_word(word)[0].split()
+        parts = dic.inserted(word).split("-")
+        return stress, parts
     else:
-        # fallback syllabification
         parts = dic.inserted(word).split("-")
         return "unknown", parts
 
@@ -41,26 +40,32 @@ def get_rhyme_group(word):
         return pronouncing.rhyming_part(phones[0])
     return None
 
+def detect_meter(text):
+    prosodic.config['print_to_screen'] = False
+    line = prosodic.Text(text)
+    line.parse()
+    scansion = line.bestParses()[0] if line.bestParses() else ""
+    return {
+        "scansion": scansion,
+        "meter": line.meter().name if line.meter() else "unknown"
+    }
+
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    original_lines = text_input.text.splitlines()
+    raw_lines = text_input.text.split("\n")
+    all_words = []
+    detected_meters = set()
 
-    # Collect rhyme groups
-    flat_words = re.findall(r"\b[\w']+\b", text_input.text.lower())
-    rhyme_groups = {}
-    for word in flat_words:
-        group = get_rhyme_group(word)
-        if group:
-            rhyme_groups.setdefault(group, []).append(word)
+    for raw_line in raw_lines:
+        words_raw = re.findall(r"\b[\w']+\b", raw_line.lower())
+        rhyme_groups = {}
+        for word in words_raw:
+            group = get_rhyme_group(word)
+            if group:
+                rhyme_groups.setdefault(group, []).append(word)
 
-    results = []
-    meter_counts = {}
-
-    for line in original_lines:
-        words_in_line = line.split()
-        line_data = []
-
-        for word in words_in_line:
+        line_words = []
+        for word in raw_line.split():
             clean_word = re.sub(r"[^\w']", '', word).lower()
             stress, syllables = get_stress_syllables(clean_word)
             rhyme_group = get_rhyme_group(clean_word)
@@ -69,34 +74,18 @@ async def analyze_text(text_input: TextInput):
             if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
                 rhyme_group_id = rhyme_group
 
-            line_data.append({
+            line_words.append({
                 "word": word,
                 "stress": stress,
                 "syllables": syllables,
                 "rhymeGroup": rhyme_group_id
             })
 
-        # Scandroid scan for the line's meter
-        scanned = scanner.scan_line(line)
-        if scanned and scanned.meter:
-            meter_label = scanned.meter.lower()
-            meter_counts[meter_label] = meter_counts.get(meter_label, 0) + 1
-        else:
-            meter_label = "unknown"
-
-        results.append({
-            "line": line_data,
-            "meter": meter_label
-        })
-
-    # Determine dominant meter
-    if meter_counts:
-        dominant_meter = max(meter_counts.items(), key=lambda x: x[1])[0]
-    else:
-        dominant_meter = "unknown"
+        meter_info = detect_meter(raw_line.strip())
+        detected_meters.add(meter_info["meter"])
+        all_words.append(line_words)
 
     return {
-        "lines": [r["line"] for r in results],
-        "detectedMeter": dominant_meter,
-        "presentMeters": list(meter_counts.keys())
+        "lines": all_words,
+        "detectedMeters": list(detected_meters)
     }
