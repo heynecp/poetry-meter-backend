@@ -5,6 +5,9 @@ RUN apt-get update && \
     apt-get install -y espeak libespeak1 libespeak-dev && \
     pip install --upgrade pip
 
+# Set environment variable for library path
+ENV LD_LIBRARY_PATH=/usr/lib:/usr/local/lib
+
 # Set the working directory
 WORKDIR /app
 
