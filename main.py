@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import pronouncing
 import pyphen
 import re
+from collections import Counter
 
 app = FastAPI()
 
@@ -19,12 +20,19 @@ dic = pyphen.Pyphen(lang='en_US')
 class TextInput(BaseModel):
     text: str
 
+METER_PATTERNS = {
+    "iambic": "01" * 5,
+    "trochaic": "10" * 5,
+    "anapestic": "001" * 3,
+    "dactylic": "100" * 3,
+}
+
 def get_stress_syllables(word):
     phones = pronouncing.phones_for_word(word)
     if phones:
         stress = pronouncing.stresses(phones[0])
-        syllables = dic.inserted(word).split("-")
-        return stress, syllables
+        parts = dic.inserted(word).split("-")
+        return stress, parts
     else:
         parts = dic.inserted(word).split("-")
         return "unknown", parts
@@ -39,35 +47,63 @@ def get_rhyme_group(word):
         return rhyme_part
     return None
 
+def detect_meter(line_stresses):
+    meter_counts = Counter()
+    for stress in line_stresses:
+        cleaned = re.sub(r"[^01]", "", stress)
+        for meter, pattern in METER_PATTERNS.items():
+            if cleaned.startswith(pattern[:len(cleaned)]):
+                meter_counts[meter] += 1
+    if len(meter_counts) == 0:
+        return ["unknown"]
+    elif len(meter_counts) > 3:
+        return ["mixed"] + [m[0] for m in meter_counts.most_common(3)]
+    return [m[0] for m in meter_counts.most_common()]
+
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    lines = text_input.text.splitlines()
-    all_lines = []
-
-    flat_words = re.findall(r"\b[\w']+\b", text_input.text.lower())
+    text = text_input.text
+    lines_raw = text.split("\n")
+    all_stresses = []
     rhyme_groups = {}
-    for word in flat_words:
+    result = []
+
+    words_flat = re.findall(r"\b[\w']+\b", text.lower())
+    for word in words_flat:
         group = get_rhyme_group(word)
         if group:
             rhyme_groups.setdefault(group, []).append(word)
 
-    for line in lines:
-        words = []
-        for word in line.split():
-            clean_word = re.sub(r"[^\w']", '', word).lower()
-            stress, syllables = get_stress_syllables(clean_word)
-            rhyme_group = get_rhyme_group(clean_word)
+    for line in lines_raw:
+        word_items = []
+        words = line.split()
+        line_stress = ""
+        for word in words:
+            clean = re.sub(r"[^\w']", '', word).lower()
+            stress, syllables = get_stress_syllables(clean)
+            rhyme = get_rhyme_group(clean)
 
-            rhyme_group_id = None
-            if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
-                rhyme_group_id = rhyme_group
+            if rhyme and len(rhyme_groups.get(rhyme, [])) > 1:
+                rhyme_id = rhyme
+            else:
+                rhyme_id = None
 
-            words.append({
+            if stress != "unknown":
+                line_stress += stress
+
+            word_items.append({
                 "word": word,
                 "stress": stress,
                 "syllables": syllables,
-                "rhymeGroup": rhyme_group_id
+                "rhymeGroup": rhyme_id
             })
-        all_lines.append(words)
 
-    return { "lines": all_lines }
+        all_stresses.append(line_stress)
+        result.append(word_items)
+
+    meters = detect_meter(all_stresses)
+
+    return {
+        "lines": result,
+        "meters": meters
+    }
