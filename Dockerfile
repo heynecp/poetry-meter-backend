@@ -1,21 +1,21 @@
 FROM python:3.11-slim
 
-# Install espeak-ng and dependencies
+# Install espeak and its dependencies
 RUN apt-get update && \
-    apt-get install -y espeak-ng libespeak-ng1 libespeak-ng-dev && \
-    pip install --upgrade pip
+    apt-get install -y espeak libespeak1 libespeak-dev && \
+    apt-get clean
 
-# Set environment variable so prosodic can find espeak-ng
-ENV PATH_ESPEAK=/usr/lib/libespeak-ng.so.1
+# Set environment variable so prosodic can find espeak
+ENV PATH_ESPEAK=/usr/lib/x86_64-linux-gnu/libespeak.so.1
 
-# Set the working directory
+# Set working directory
 WORKDIR /app
 
-# Copy your project files into the container
+# Copy app files
 COPY . /app
 
 # Install Python dependencies
-RUN pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # Start the FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
