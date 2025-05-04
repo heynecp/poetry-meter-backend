@@ -1,52 +1,45 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import pronouncing
+import pyphen
+import re
 
 app = FastAPI()
 
-# Allow frontend to access backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+dic = pyphen.Pyphen(lang='en')
+
+def get_rhyme_group(word):
+    rhymes = pronouncing.rhymes(word)
+    if not rhymes:
+        return None
+    return min([hash(r) % 1000 for r in rhymes])
+
 @app.post("/analyze")
-async def analyze_text(request: Request):
+async def analyze(request: Request):
     data = await request.json()
     text = data.get("text", "")
-    words = text.strip().split()
+    words_raw = re.findall(r"\\b[\\w']+\\b", text.lower())
 
     result = []
-    rhyme_dict = {}
-    rhyme_group_counter = 0
-
-    for word in words:
-        # Clean up punctuation (keep apostrophes if desired)
-        clean_word = ''.join(filter(str.isalpha, word.lower()))
-        stresses = pronouncing.stresses(clean_word)
-        rhymes = pronouncing.rhymes(clean_word)
-
-        # Find rhyme group if any
-        rhyme_group = None
-        for rh in rhymes:
-            if rh in rhyme_dict:
-                rhyme_group = rhyme_dict[rh]
-                break
-
-        # If none assigned yet, assign new group
-        if rhymes and rhyme_group is None:
-            rhyme_group = rhyme_group_counter
-            for rh in rhymes:
-                rhyme_dict[rh] = rhyme_group
-            rhyme_group_counter += 1
-
+    for word in words_raw:
+        phones = pronouncing.phones_for_word(word)
+        if phones:
+            stresses = pronouncing.stresses(phones[0])
+            syllables = dic.inserted(word).split("-")
+        else:
+            stresses = "unknown"
+            syllables = [word]
         result.append({
             "word": word,
-            "stress": stresses[0] if stresses else "unknown",
-            "rhymeGroup": rhyme_group if rhyme_group is not None else None
+            "syllables": syllables,
+            "stress": stresses,
+            "rhymeGroup": get_rhyme_group(word)
         })
-
     return { "words": result }
