@@ -26,12 +26,15 @@ def analyze_line(line):
     try:
         parsed = Text(txt=line)
         parsed.parse()
+        tokens = parsed.tokens()
+        if tokens is None:
+            raise ValueError("Parsed tokens returned None")
     except Exception as e:
         print(f"Prosodic failed on line: {line!r} with error: {e}")
         return [{"word": line.strip(), "stress": "unknown"}]
 
     line_data = []
-    for token in parsed.tokens():
+    for token in tokens:
         word_text = token.string
         stress = token.stress()
         syllables = dic.inserted(word_text).split('-') if word_text else []
@@ -55,7 +58,7 @@ def get_rhyme_group(word):
 @app.post("/analyze")
 async def analyze_text(body: RequestBody):
     lines = body.text.splitlines()
-    result = [analyze_line(line) for line in lines if line.strip()]
+    result = [analyze_line(line) if line.strip() else [] for line in lines]
 
     # Flatten all lines to check for overall meter
     flat_text = ' '.join(body.text.splitlines()).strip()
