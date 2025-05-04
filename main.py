@@ -3,11 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from prosodic import Text
 import pronouncing
-import re
 
 app = FastAPI()
 
-# Allow CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,17 +26,18 @@ async def analyze_text(req: TextRequest):
         parsed = Text(line)
         try:
             parsed.parse()
+            tokens = parsed.tokens if isinstance(parsed.tokens, list) else parsed.tokens()
         except Exception:
             output.append([])
             continue
 
         line_data = []
 
-        for token in parsed.tokens():
+        for token in tokens:
             word = token.string
             stress = token.stress()
             syllables = token.syllables()
-            syll_strs = [s.string for s in syllables]
+            syll_strs = [s.string for s in syllables] if syllables else []
 
             phones = pronouncing.phones_for_word(word.lower())
             rhyme_group = None
@@ -62,10 +61,11 @@ async def analyze_text(req: TextRequest):
 
         output.append(line_data)
 
+    # Determine overall meter
     try:
-        full_text = Text(req.text)
-        full_text.parse()
-        meter = full_text.bestMeter().name if full_text.bestMeter() else "free verse"
+        full = Text(req.text)
+        full.parse()
+        meter = full.bestMeter().name if full.bestMeter() else "free verse"
     except Exception:
         meter = "free verse"
 
