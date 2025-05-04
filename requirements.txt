@@ -2,4 +2,4 @@ fastapi
 uvicorn
 pronouncing
 pyphen
-git+https://github.com/quadrismegistus/prosodic-ng.git
+prosodic @ git+https://github.com/quadrismegistus/prosodic.git
