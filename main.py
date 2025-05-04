@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from prosodic import Text
 import pronouncing
 import pyphen
+import os
+os.environ["PATH_ESPEAK"] = "/usr/lib/x86_64-linux-gnu/libespeak.so.1"
 
 app = FastAPI()
 
