@@ -25,7 +25,7 @@ def get_rhyme_group(word):
 async def analyze(request: Request):
     data = await request.json()
     text = data.get("text", "")
-    words_raw = re.findall(r"\\b[\\w']+\\b", text.lower())
+    words_raw = re.findall(r"\b[\w']+\b", text.lower())
 
     result = []
     for word in words_raw:
