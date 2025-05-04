@@ -26,15 +26,15 @@ def analyze_line(line):
     try:
         parsed = Text(txt=line)
         parsed.parse()
-        tokens = parsed.tokens()
-        if tokens is None:
-            raise ValueError("Parsed tokens returned None")
+        tokens = parsed.tokens
+        if tokens is None or not callable(tokens):
+            raise ValueError("tokens() is not callable or missing")
     except Exception as e:
         print(f"Prosodic failed on line: {line!r} with error: {e}")
         return [{"word": line.strip(), "stress": "unknown"}]
 
     line_data = []
-    for token in tokens:
+    for token in tokens():
         word_text = token.string
         stress = token.stress()
         syllables = dic.inserted(word_text).split('-') if word_text else []
