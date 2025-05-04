@@ -7,7 +7,6 @@ import re
 
 app = FastAPI()
 
-# Allow CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,7 +14,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize hyphenation dictionary
 dic = pyphen.Pyphen(lang='en_US')
 
 class TextInput(BaseModel):
@@ -25,12 +23,9 @@ def get_stress_syllables(word):
     phones = pronouncing.phones_for_word(word)
     if phones:
         stress = pronouncing.stresses(phones[0])
-        # Estimate syllables using pyphen hyphenation
-        hyphenated = dic.inserted(word)
-        syllables = hyphenated.split('-') if hyphenated else [word]
+        syllables = dic.inserted(word).split("-")
         return stress, syllables
     else:
-        # fallback to pyphen only
         parts = dic.inserted(word).split("-")
         return "unknown", parts
 
@@ -46,30 +41,33 @@ def get_rhyme_group(word):
 
 @app.post("/analyze")
 async def analyze_text(text_input: TextInput):
-    words_raw = re.findall(r"\b[\w']+\b", text_input.text.lower())
-    
-    # Precompute rhyme groups to only return when 2+ words share rhyme
+    lines = text_input.text.splitlines()
+    all_lines = []
+
+    flat_words = re.findall(r"\b[\w']+\b", text_input.text.lower())
     rhyme_groups = {}
-    for word in words_raw:
+    for word in flat_words:
         group = get_rhyme_group(word)
         if group:
             rhyme_groups.setdefault(group, []).append(word)
 
-    words = []
-    for word in text_input.text.split():
-        clean_word = re.sub(r"[^\w']", '', word).lower()
-        stress, syllables = get_stress_syllables(clean_word)
-        rhyme_group = get_rhyme_group(clean_word)
+    for line in lines:
+        words = []
+        for word in line.split():
+            clean_word = re.sub(r"[^\w']", '', word).lower()
+            stress, syllables = get_stress_syllables(clean_word)
+            rhyme_group = get_rhyme_group(clean_word)
 
-        rhyme_group_id = None
-        if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
-            rhyme_group_id = rhyme_group
+            rhyme_group_id = None
+            if rhyme_group and len(rhyme_groups.get(rhyme_group, [])) > 1:
+                rhyme_group_id = rhyme_group
 
-        words.append({
-            "word": word,
-            "stress": stress,
-            "syllables": syllables,
-            "rhymeGroup": rhyme_group_id
-        })
+            words.append({
+                "word": word,
+                "stress": stress,
+                "syllables": syllables,
+                "rhymeGroup": rhyme_group_id
+            })
+        all_lines.append(words)
 
-    return {"words": words}
+    return { "lines": all_lines }
