@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Dict, List
 import pronouncing
 import pyphen
 import string
@@ -21,24 +22,26 @@ syllable_dict = pyphen.Pyphen(lang='en')
 
 class RequestBody(BaseModel):
     text: str
+    customStresses: Dict[str, List[str]] = {}
 
 # Constants
 HYBRID_FLAG = "hybrid"
 
 # Helper to clean punctuation and normalize
-
 def clean_word(word):
     word = re.sub(r'[\u2019\u2018]', "'", word)  # Normalize smart quotes
     word = re.sub(r'[\u2014\u2013]', "--", word)  # Normalize em/en dash
     return word.strip(string.punctuation).lower()
 
-def get_stress_pattern(word):
+def get_stress_pattern(word, customStresses):
     cleaned = clean_word(word)
+    if cleaned in customStresses:
+        return customStresses[cleaned], syllable_dict.inserted(cleaned).split('-')
+
     phones = pronouncing.phones_for_word(cleaned)
     syllables = syllable_dict.inserted(cleaned).split('-')
 
     if not phones:
-        # Assign alternating fallback stress
         default_stress = ["1" if i % 2 == 0 else "0" for i in range(len(syllables))]
         return HYBRID_FLAG, syllables
 
@@ -53,12 +56,12 @@ def get_rhyme_group(word):
     rhyming_part = pronouncing.rhyming_part(phones[0])
     return hash(rhyming_part) % 36 if rhyming_part else None
 
-def analyze_line(line):
+def analyze_line(line, customStresses):
     words = line.strip().split()
     line_data = []
 
     for word in words:
-        stress, syllables = get_stress_pattern(word)
+        stress, syllables = get_stress_pattern(word, customStresses)
         if stress == HYBRID_FLAG:
             stress_list = ["2"] * len(syllables)  # 2 = hybrid
         else:
@@ -111,6 +114,6 @@ def guess_meter(lines):
 @app.post("/analyze")
 async def analyze_text(body: RequestBody):
     lines = body.text.splitlines()
-    result = [analyze_line(line) if line.strip() else [] for line in lines]
+    result = [analyze_line(line, body.customStresses) if line.strip() else [] for line in lines]
     meter_type = guess_meter(result)
     return {"lines": result, "meter": meter_type}
