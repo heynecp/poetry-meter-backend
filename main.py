@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import pronouncing
 import pyphen
 import string
+import re
 
 app = FastAPI()
 
@@ -15,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-##syllable counter
+# syllable counter
 syllable_dict = pyphen.Pyphen(lang='en')
 
 class RequestBody(BaseModel):
@@ -24,17 +25,20 @@ class RequestBody(BaseModel):
 # Constants
 HYBRID_FLAG = "hybrid"
 
-# Helper to clean punctuation
+# Helper to clean punctuation and normalize
+
 def clean_word(word):
-    return word.strip(string.punctuation)
+    word = re.sub(r'[\u2019\u2018]', "'", word)  # Normalize smart quotes
+    word = re.sub(r'[\u2014\u2013]', "--", word)  # Normalize em/en dash
+    return word.strip(string.punctuation).lower()
 
 def get_stress_pattern(word):
-    phones = pronouncing.phones_for_word(word.lower())
-    clean = clean_word(word)
-    syllables = syllable_dict.inserted(clean).split('-')
+    cleaned = clean_word(word)
+    phones = pronouncing.phones_for_word(cleaned)
+    syllables = syllable_dict.inserted(cleaned).split('-')
 
     if not phones:
-        # Assign alternating stress if unknown
+        # Assign alternating fallback stress
         default_stress = ["1" if i % 2 == 0 else "0" for i in range(len(syllables))]
         return HYBRID_FLAG, syllables
 
