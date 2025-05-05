@@ -1,3 +1,4 @@
+#import runs
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+##syllable counter
 syllable_dict = pyphen.Pyphen(lang='en')
 
 class RequestBody(BaseModel):
@@ -33,7 +35,7 @@ def get_stress_pattern(word):
 
     if not phones:
         # Assign alternating stress if unknown
-        default_stress = [("1" if i % 2 == 0 else "0") for i in range(len(syllables))]
+        default_stress = ["1" if i % 2 == 0 else "0" for i in range(len(syllables))]
         return HYBRID_FLAG, syllables
 
     stresses = pronouncing.stresses(phones[0])
@@ -91,7 +93,7 @@ def guess_meter(lines):
 
     if not stress_seq:
         return "free verse"
-    
+
     top_meter, count = sorted_meters[0]
     total = sum(meter_counts.values())
 
